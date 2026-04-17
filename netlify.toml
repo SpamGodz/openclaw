@@ -1,0 +1,23 @@
+[build]
+  command   = "cd frontend && yarn install && yarn build"
+  publish   = "frontend/build"
+
+[functions]
+  directory = "netlify/functions"
+
+# Route all /api/* to the Python serverless function
+[[redirects]]
+  from   = "/api/*"
+  to     = "/.netlify/functions/api"
+  status = 200
+  force  = true
+
+# SPA fallback — must come last
+[[redirects]]
+  from   = "/*"
+  to     = "/index.html"
+  status = 200
+
+[build.environment]
+  REACT_APP_BACKEND_URL = ""
+  NODE_VERSION          = "22"

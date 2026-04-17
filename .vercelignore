@@ -1,0 +1,7 @@
+frontend/node_modules
+frontend/.env
+backend/.env
+memory/
+test_reports/
+tests/
+*.log

@@ -113,12 +113,16 @@ class User(BaseModel):
 
 
 class SessionRequest(BaseModel):
-    session_id: str
+    code: str
+    code_verifier: str
+    redirect_uri: str
 
 
 # ============== Authentication Helpers ==============
 
-EMERGENT_AUTH_URL = "https://demobackend.emergentagent.com/auth/v1/env/oauth/session-data"
+CLAUDE_TOKEN_URL = "https://claude.ai/api/oauth/token"
+CLAUDE_CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
+CLAUDE_PROFILE_URL = "https://api.anthropic.com/v1/me"
 SESSION_EXPIRY_DAYS = 7
 
 
@@ -237,27 +241,54 @@ async def get_instance_status():
 @api_router.post("/auth/session")
 async def create_session(request: SessionRequest, response: Response):
     """
-    Exchange session_id from Emergent Auth for a session token.
+    Exchange Claude OAuth PKCE authorization code for a session token.
     Creates user if not exists, creates session, sets cookie.
     Blocks non-owners if instance is locked.
     """
     try:
-        # Call Emergent Auth to get user data
         async with httpx.AsyncClient() as client:
-            auth_response = await client.get(
-                EMERGENT_AUTH_URL,
-                headers={"X-Session-ID": request.session_id},
-                timeout=10.0
+            # Exchange authorization code for tokens
+            token_response = await client.post(
+                CLAUDE_TOKEN_URL,
+                json={
+                    "grant_type": "authorization_code",
+                    "client_id": CLAUDE_CLIENT_ID,
+                    "code": request.code,
+                    "redirect_uri": request.redirect_uri,
+                    "code_verifier": request.code_verifier,
+                },
+                timeout=15.0,
             )
 
-        if auth_response.status_code != 200:
-            logger.error(f"Emergent Auth error: {auth_response.status_code} - {auth_response.text}")
-            raise HTTPException(status_code=401, detail="Invalid session_id")
+            if token_response.status_code != 200:
+                logger.error(f"Claude token exchange error: {token_response.status_code} - {token_response.text}")
+                raise HTTPException(status_code=401, detail="Token exchange failed")
 
-        auth_data = auth_response.json()
-        email = auth_data.get("email")
-        name = auth_data.get("name", email.split("@")[0] if email else "User")
-        picture = auth_data.get("picture")
+            tokens = token_response.json()
+            access_token = tokens.get("access_token")
+            if not access_token:
+                raise HTTPException(status_code=401, detail="No access token in response")
+
+            # Fetch user profile with the access token
+            profile_response = await client.get(
+                CLAUDE_PROFILE_URL,
+                headers={"Authorization": f"Bearer {access_token}"},
+                timeout=10.0,
+            )
+
+            if profile_response.status_code != 200:
+                logger.error(f"Claude profile error: {profile_response.status_code} - {profile_response.text}")
+                raise HTTPException(status_code=401, detail="Could not fetch user profile")
+
+            profile = profile_response.json()
+
+        email = profile.get("email") or profile.get("email_address")
+        name = (
+            profile.get("name")
+            or profile.get("display_name")
+            or (email.split("@")[0] if email else "User")
+        )
+        picture = profile.get("picture") or profile.get("avatar_url")
 
         if not email:
             raise HTTPException(status_code=400, detail="No email in auth response")

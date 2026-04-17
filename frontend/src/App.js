@@ -11,9 +11,8 @@ import { Toaster } from "@/components/ui/sonner";
 function AppRouter() {
   const location = useLocation();
   
-  // Check URL fragment (not query params) for session_id - MUST be synchronous
-  // This runs BEFORE ProtectedRoute to prevent race conditions
-  if (location.hash?.includes('session_id=')) {
+  // Detect Claude OAuth callback via ?code= query param — runs before route matching
+  if (new URLSearchParams(location.search).get('code')) {
     return <AuthCallback />;
   }
   

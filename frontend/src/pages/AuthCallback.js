@@ -20,23 +20,35 @@ export default function AuthCallback() {
 
     const processAuth = async () => {
       try {
-        // Extract session_id from URL fragment
-        const hash = window.location.hash;
-        const params = new URLSearchParams(hash.replace('#', ''));
-        const sessionId = params.get('session_id');
+        // Extract OAuth code and state from query params
+        const params = new URLSearchParams(window.location.search);
+        const code = params.get('code');
+        const returnedState = params.get('state');
+        const codeVerifier = sessionStorage.getItem('pkce_code_verifier');
+        const savedState = sessionStorage.getItem('pkce_state');
 
-        if (!sessionId) {
-          console.error('No session_id in URL');
+        sessionStorage.removeItem('pkce_code_verifier');
+        sessionStorage.removeItem('pkce_state');
+
+        if (!code || !codeVerifier) {
+          console.error('Missing OAuth code or PKCE verifier');
           navigate('/login', { replace: true });
           return;
         }
 
-        // Exchange session_id for session
+        if (returnedState !== savedState) {
+          console.error('OAuth state mismatch — possible CSRF');
+          navigate('/login', { replace: true });
+          return;
+        }
+
+        const redirectUri = window.location.origin + '/';
+
         const response = await fetch(`${API}/auth/session`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'include',
-          body: JSON.stringify({ session_id: sessionId })
+          body: JSON.stringify({ code, code_verifier: codeVerifier, redirect_uri: redirectUri })
         });
 
         if (!response.ok) {
@@ -55,7 +67,7 @@ export default function AuthCallback() {
 
         const data = await response.json();
         
-        // Clear the hash from URL and navigate to dashboard with user data
+        // Clear the query params from URL and navigate to dashboard with user data
         window.history.replaceState(null, '', window.location.pathname);
         navigate('/', { replace: true, state: { user: data.user } });
         

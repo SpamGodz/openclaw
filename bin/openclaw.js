@@ -28,17 +28,63 @@ program
   .action(() => {
     console.log('\nopenclaw build check\n');
     const checks = [
-      { label: 'ANTHROPIC_API_KEY', value: process.env.ANTHROPIC_API_KEY, required: false },
-      { label: 'HERMES_URL', value: process.env.HERMES_URL, required: false },
-      { label: 'PORT', value: process.env.PORT || '3000 (default)', required: false },
+      { label: 'ANTHROPIC_API_KEY', value: process.env.ANTHROPIC_API_KEY },
+      { label: 'HERMES_URL', value: process.env.HERMES_URL },
+      { label: 'HERMES_PATH', value: process.env.HERMES_PATH },
+      { label: 'HERMES_MODEL', value: process.env.HERMES_MODEL },
+      { label: 'HERMES_BRIDGE_PORT', value: process.env.HERMES_BRIDGE_PORT },
+      { label: 'PORT', value: process.env.PORT || '3000 (default)' },
     ];
     checks.forEach(({ label, value }) => {
       const status = value ? '✓' : '○';
       const display = value ? (label.includes('KEY') ? '[set]' : value) : 'not set';
-      console.log(`  ${status}  ${label.padEnd(20)} ${display}`);
+      console.log(`  ${status}  ${label.padEnd(22)} ${display}`);
     });
-    console.log('\nNote: ANTHROPIC_API_KEY is used when HERMES_URL is not set (standalone mode).');
-    console.log('Build ready. Run `openclaw deploy` to start the server.\n');
+    console.log('\nHermes mode:  set HERMES_URL + HERMES_PATH, run `openclaw hermes-bridge`');
+    console.log('Claude mode:  set ANTHROPIC_API_KEY only (no Hermes needed)');
+    console.log('\nRun `openclaw deploy` to start the dashboard server.\n');
+  });
+
+program
+  .command('hermes-setup')
+  .description('Clone and install Hermes Agent (NousResearch/hermes-agent)')
+  .option('--path <dir>', 'Install Hermes to this directory', process.env.HERMES_PATH || `${process.env.HOME}/.hermes-agent`)
+  .action((opts) => {
+    process.env.HERMES_PATH = opts.path;
+    const script = path.join(PKG_DIR, 'scripts/hermes-setup.sh');
+    console.log(`\nRunning Hermes setup (target: ${opts.path})...\n`);
+    try {
+      execSync(`bash "${script}"`, { stdio: 'inherit', env: { ...process.env, HERMES_PATH: opts.path } });
+    } catch (err) {
+      console.error('\nSetup failed. Check output above for details.');
+      process.exit(1);
+    }
+  });
+
+program
+  .command('hermes-bridge')
+  .description('Start the Hermes HTTP bridge (exposes Hermes Agent as REST API for openclaw)')
+  .option('-p, --port <port>', 'Bridge port', process.env.HERMES_BRIDGE_PORT || '8000')
+  .option('--hermes-path <dir>', 'Path to hermes-agent clone', process.env.HERMES_PATH || `${process.env.HOME}/.hermes-agent`)
+  .action((opts) => {
+    const bridgeScript = path.join(PKG_DIR, 'scripts/hermes-http-bridge.py');
+    const python = findPython();
+    if (!python) {
+      console.error('Python 3 not found. Install Python 3.11+ and try again.');
+      process.exit(1);
+    }
+    const env = {
+      ...process.env,
+      HERMES_BRIDGE_PORT: opts.port,
+      HERMES_PATH: opts.hermesPath,
+    };
+    console.log(`\nStarting Hermes bridge on port ${opts.port} ...`);
+    console.log(`Using Python: ${python}`);
+    console.log(`Hermes path:  ${opts.hermesPath}\n`);
+    const bridge = spawn(python, [bridgeScript], { stdio: 'inherit', env });
+    bridge.on('error', (err) => { console.error('Bridge error:', err.message); process.exit(1); });
+    process.on('SIGINT', () => { bridge.kill(); process.exit(0); });
+    process.on('SIGTERM', () => { bridge.kill(); process.exit(0); });
   });
 
 program
@@ -86,6 +132,16 @@ program
     copyDir(PKG_DIR, dest, excludes);
     console.log('Done.');
   });
+
+function findPython() {
+  for (const cmd of ['python3', 'python']) {
+    try {
+      const ver = execSync(`${cmd} --version 2>&1`, { encoding: 'utf8' }).trim();
+      if (ver.includes('Python 3')) return cmd;
+    } catch { /* not found */ }
+  }
+  return null;
+}
 
 function copyDir(src, dest, excludes = []) {
   fs.mkdirSync(dest, { recursive: true });

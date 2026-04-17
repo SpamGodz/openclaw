@@ -168,22 +168,53 @@ function executeTool(name, input, serverUrl) {
 
 // ── Hermes mode ───────────────────────────────────────────────────────────
 
+const HERMES_BRIDGE_URL = HERMES_URL || `http://localhost:${process.env.HERMES_BRIDGE_PORT || 8000}`;
+
 async function checkHermes() {
-  if (!HERMES_URL) return false;
+  const url = HERMES_URL || HERMES_BRIDGE_URL;
   try {
-    await axios.get(`${HERMES_URL}/health`, { timeout: 3000 });
-    hermesAvailable = true;
-    console.log(`[hermes-bridge] Connected to Hermes at ${HERMES_URL}`);
-    return true;
+    const res = await axios.get(`${url}/health`, { timeout: 3000 });
+    if (res.data && res.data.status === 'ok') {
+      hermesAvailable = true;
+      const hermesReady = res.data.hermes !== false;
+      console.log(`[hermes-bridge] Connected to Hermes bridge at ${url}`);
+      if (!hermesReady) {
+        console.log('[hermes-bridge] WARNING: Hermes Agent not installed in bridge — run: openclaw hermes-setup');
+      }
+      return true;
+    }
   } catch {
-    console.log('[hermes-bridge] Hermes not reachable, using Claude fallback');
-    return false;
+    if (HERMES_URL) {
+      console.log(`[hermes-bridge] Hermes bridge not reachable at ${HERMES_URL}, using Claude fallback`);
+    } else {
+      console.log('[hermes-bridge] No Hermes bridge running, using Claude fallback');
+    }
   }
+  return false;
 }
 
-async function chatWithHermes(message) {
-  const res = await axios.post(`${HERMES_URL}/chat`, { message }, { timeout: 30000 });
-  return res.data;
+async function chatWithHermes(message, serverUrl) {
+  const url = HERMES_URL || HERMES_BRIDGE_URL;
+  // Hermes calls can take a while — 120s timeout
+  const res = await axios.post(`${url}/chat`, { message }, { timeout: 120000 });
+  const data = res.data;
+
+  // Bridge returns { response, actions } where actions come from [OPENCLAW:...] tags
+  const text = data.response || data.message || JSON.stringify(data);
+  const hermesActions = Array.isArray(data.actions) ? data.actions : [];
+
+  // Execute any openclaw actions Hermes requested
+  const executedActions = [];
+  for (const action of hermesActions) {
+    try {
+      const { result, actions } = executeTool(action.type, action, serverUrl);
+      executedActions.push(...actions);
+    } catch (err) {
+      console.error(`[hermes-bridge] Action ${action.type} failed:`, err.message);
+    }
+  }
+
+  return { text, actions: executedActions };
 }
 
 // ── Claude fallback mode ──────────────────────────────────────────────────
@@ -246,29 +277,63 @@ async function chatWithClaude(message, serverUrl) {
 async function chat(message, serverUrl) {
   try {
     if (hermesAvailable) {
-      const data = await chatWithHermes(message);
-      return { text: data.response || data.message || JSON.stringify(data), actions: [], source: 'hermes' };
+      const result = await chatWithHermes(message, serverUrl);
+      return { ...result, source: 'hermes' };
     }
     const result = await chatWithClaude(message, serverUrl);
     return { ...result, source: 'claude' };
   } catch (err) {
     console.error('[hermes-bridge] chat error:', err.message);
-    return { text: `Error: ${err.message}`, actions: [], source: 'error' };
+    // On Hermes timeout/error, fall through to Claude if available
+    if (hermesAvailable && anthropicClient) {
+      console.log('[hermes-bridge] Falling back to Claude after Hermes error');
+      try {
+        const result = await chatWithClaude(message, serverUrl);
+        return { ...result, source: 'claude' };
+      } catch { /* ignore */ }
+    }
+    return { text: `AI error: ${err.message}`, actions: [], source: 'error' };
   }
 }
 
 // ── Sync pod events → Hermes memory ──────────────────────────────────────
 
 async function syncEventToHermes(event) {
-  if (!hermesAvailable || !HERMES_URL) return;
+  if (!hermesAvailable) return;
+  const url = HERMES_URL || HERMES_BRIDGE_URL;
   try {
-    await axios.post(`${HERMES_URL}/memory`, { content: JSON.stringify(event) }, { timeout: 5000 });
-  } catch { /* non-critical */ }
+    const summary = summariseEvent(event);
+    if (summary) {
+      await axios.post(`${url}/memory`, { content: summary }, { timeout: 5000 });
+    }
+  } catch { /* non-critical — don't let memory sync break anything */ }
+}
+
+function summariseEvent(event) {
+  if (!event || !event.type) return null;
+  if (event.type === 'POD_EVENT') {
+    const p = event.pod || {};
+    const ev = event.event;
+    if (ev === 'JOINED') return `Pod joined hive: ${p.name} (id=${p.id}, universe=${p.universeId || 'none'})`;
+    if (ev === 'STATUS') return `Pod ${event.podId} status → ${event.status}`;
+    if (ev === 'LOG') return `Pod ${event.podId} log: ${event.entry?.msg}`;
+    if (ev === 'METRIC') return `Pod ${event.podId} metrics: cpu=${event.metrics?.cpu}% mem=${event.metrics?.memory}MB`;
+  }
+  if (event.type === 'BUSINESS_EVENT') {
+    const ev = event.event;
+    if (ev === 'TASK_ADDED') return `Task added: "${event.task?.title}"`;
+    if (ev === 'LEAD_ADDED') return `New lead: ${event.lead?.name} (${event.lead?.stage})`;
+    if (ev === 'UNIVERSE_CREATED') return `Universe created: "${event.universe?.name}"`;
+    if (ev === 'UNIVERSE_PROMOTED') return `Universe promoted to real: "${event.universe?.name}"`;
+    if (ev === 'INSIGHT_ADDED') return `Insight posted: ${event.insight?.content?.slice(0, 80)}`;
+  }
+  return null;
 }
 
 async function init() {
   await checkHermes();
-  if (!hermesAvailable) initClaude();
+  // Always init Claude as fallback (used when Hermes unavailable or errors)
+  initClaude();
 }
 
 module.exports = { init, chat, syncEventToHermes, executeTool };

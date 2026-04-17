@@ -1,0 +1,10 @@
+node_modules/
+data/
+test/
+.emergent/
+backend/
+frontend/
+memory/
+test_reports/
+*.log
+.env

@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>openclaw — pod hive</title>
+<link rel="stylesheet" href="styles.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+</head>
+<body>
+<div id="app">
+
+  <!-- Sidebar -->
+  <aside id="sidebar">
+    <div id="sidebar-header">
+      openclaw hive
+      <select id="universe-select">
+        <option value="">All Universes</option>
+      </select>
+    </div>
+    <div id="pod-list"></div>
+    <div id="sidebar-footer">
+      <span id="pod-count">0 pods</span>
+    </div>
+  </aside>
+
+  <!-- Main -->
+  <div id="main">
+    <header id="header">
+      <span class="logo">open<span>claw</span></span>
+      <div id="hermes-status">
+        <div id="hermes-dot"></div>
+        <span id="hermes-label">connecting...</span>
+      </div>
+    </header>
+
+    <nav id="nav">
+      <div class="nav-tab active" data-panel="pods">Pods</div>
+      <div class="nav-tab" data-panel="chat">Hive Chat</div>
+      <div class="nav-tab" data-panel="tasks">Tasks &amp; Goals</div>
+      <div class="nav-tab" data-panel="insights">Insights</div>
+      <div class="nav-tab" data-panel="crm">CRM</div>
+      <div class="nav-tab" data-panel="universes">Universes</div>
+    </nav>
+
+    <div id="panels">
+
+      <!-- Pods panel -->
+      <div class="panel active" id="panel-pods">
+        <div id="no-pod-selected" class="empty-state">
+          Select a pod from the sidebar to inspect it.
+        </div>
+        <div id="pod-detail" style="display:none">
+          <div class="pod-detail-header">
+            <span class="pod-detail-name" id="detail-name"></span>
+            <span class="pod-detail-status" id="detail-status"></span>
+          </div>
+          <div class="pod-tabs">
+            <div class="pod-tab active" data-tab="logs">Logs</div>
+            <div class="pod-tab" data-tab="metrics">Metrics</div>
+            <div class="pod-tab" data-tab="code">Code</div>
+          </div>
+          <div class="pod-tab-content active" id="tab-logs">
+            <div id="log-output"></div>
+          </div>
+          <div class="pod-tab-content" id="tab-metrics">
+            <div class="metrics-grid">
+              <div class="metric-card">
+                <div class="metric-label">CPU</div>
+                <div><span class="metric-value" id="m-cpu">0</span><span class="metric-unit">%</span></div>
+                <div class="metric-bar-wrap"><div class="metric-bar" id="bar-cpu" style="width:0%"></div></div>
+              </div>
+              <div class="metric-card">
+                <div class="metric-label">Memory</div>
+                <div><span class="metric-value" id="m-mem">0</span><span class="metric-unit">MB</span></div>
+                <div class="metric-bar-wrap"><div class="metric-bar" id="bar-mem" style="width:0%"></div></div>
+              </div>
+              <div class="metric-card">
+                <div class="metric-label">Uptime</div>
+                <div><span class="metric-value" id="m-uptime">0</span><span class="metric-unit">s</span></div>
+              </div>
+            </div>
+          </div>
+          <div class="pod-tab-content" id="tab-code">
+            <div id="code-output"><pre><code id="code-block" class="language-javascript">// No code received yet.</code></pre></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Chat panel -->
+      <div class="panel" id="panel-chat">
+        <div id="chat-wrap">
+          <div id="chat-messages"></div>
+          <div id="chat-input-row">
+            <textarea id="chat-input" rows="2" placeholder="Message the hive... (Enter to send, Shift+Enter for newline)"></textarea>
+            <button id="chat-send">Send</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tasks panel -->
+      <div class="panel" id="panel-tasks">
+        <div class="kanban">
+          <div class="kanban-col">
+            <div class="kanban-col-header todo">Todo <span id="todo-count">0</span></div>
+            <div id="col-todo"></div>
+            <button class="add-task-btn" id="btn-add-task">+ Add task</button>
+          </div>
+          <div class="kanban-col">
+            <div class="kanban-col-header inprogress">In Progress <span id="inprogress-count">0</span></div>
+            <div id="col-inprogress"></div>
+          </div>
+          <div class="kanban-col">
+            <div class="kanban-col-header done">Done <span id="done-count">0</span></div>
+            <div id="col-done"></div>
+          </div>
+        </div>
+        <div class="goals-section">
+          <h3>Goals</h3>
+          <div id="goals-list"></div>
+        </div>
+      </div>
+
+      <!-- Insights panel -->
+      <div class="panel" id="panel-insights">
+        <div id="insights-list"></div>
+      </div>
+
+      <!-- CRM panel -->
+      <div class="panel" id="panel-crm">
+        <div class="crm-board">
+          <div class="crm-col">
+            <div class="crm-col-header prospect">Prospect</div>
+            <div id="crm-prospect"></div>
+          </div>
+          <div class="crm-col">
+            <div class="crm-col-header qualified">Qualified</div>
+            <div id="crm-qualified"></div>
+          </div>
+          <div class="crm-col">
+            <div class="crm-col-header closed">Closed</div>
+            <div id="crm-closed"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Universes panel -->
+      <div class="panel" id="panel-universes">
+        <button class="btn-create" id="btn-create-universe">+ New Universe</button>
+        <div class="universes-grid" id="universes-grid"></div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<!-- Modals -->
+<div class="modal-overlay" id="modal-task">
+  <div class="modal">
+    <h3>Add Task</h3>
+    <input type="text" id="task-title" placeholder="Task title">
+    <textarea id="task-desc" placeholder="Description (optional)"></textarea>
+    <div class="modal-actions">
+      <button class="btn-cancel" id="cancel-task">Cancel</button>
+      <button class="btn-submit" id="submit-task">Add Task</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="modal-universe">
+  <div class="modal">
+    <h3>New Universe</h3>
+    <input type="text" id="universe-name" placeholder="Universe name">
+    <textarea id="universe-desc" placeholder="Description (optional)"></textarea>
+    <div class="modal-actions">
+      <button class="btn-cancel" id="cancel-universe">Cancel</button>
+      <button class="btn-submit" id="submit-universe">Create</button>
+    </div>
+  </div>
+</div>
+
+<script src="dashboard.js"></script>
+</body>
+</html>

@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useEffect } from 'react';
+import React, { useMemo, useState, useEffect, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Button } from '@/components/ui/button';
@@ -8,29 +8,51 @@ import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter }
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
 import { Progress } from '@/components/ui/progress';
 import { toast } from 'sonner';
-import { Eye, EyeOff, Loader2, ExternalLink, CheckCircle2, LogOut, AlertCircle, User } from 'lucide-react';
+import { Eye, EyeOff, Loader2, ExternalLink, CheckCircle2, LogOut, AlertCircle, User, Activity, Server, Cpu, Shield, RefreshCw } from 'lucide-react';
 import OpenClaw from '@/components/ui/icons/OpenClaw';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || '';
 const API = `${BACKEND_URL}/api`;
 
+const STATUS_POLL_MS = 10000;
+
+function formatUptime(startedAt) {
+  if (!startedAt) return '—';
+  const started = new Date(startedAt).getTime();
+  if (isNaN(started)) return '—';
+  const diffMs = Date.now() - started;
+  if (diffMs < 0) return '—';
+  const s = Math.floor(diffMs / 1000);
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = s % 60;
+  if (h > 0) return `${h}h ${m}m`;
+  if (m > 0) return `${m}m ${sec}s`;
+  return `${sec}s`;
+}
+
 export default function SetupPage() {
   const navigate = useNavigate();
   const location = useLocation();
-  
+
   const [user, setUser] = useState(location.state?.user || null);
   const [isAuthenticated, setIsAuthenticated] = useState(location.state?.user ? true : null);
   const [provider, setProvider] = useState('emergent');
   const [apiKey, setApiKey] = useState('');
   const [reveal, setReveal] = useState(false);
-  const [showAdvanced, setShowAdvanced] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [progress, setProgress] = useState(0);
   const [status, setStatus] = useState(null);
   const [checkingStatus, setCheckingStatus] = useState(true);
+  const [uptimeTick, setUptimeTick] = useState(0);
+  const pollRef = useRef(null);
 
-  // Check auth on mount (if not passed from AuthCallback)
+  useEffect(() => {
+    const id = setInterval(() => setUptimeTick(t => t + 1), 1000);
+    return () => clearInterval(id);
+  }, []);
+
   useEffect(() => {
     if (location.state?.user) {
       setIsAuthenticated(true);
@@ -38,12 +60,10 @@ export default function SetupPage() {
       checkOpenClawStatus();
       return;
     }
-    
+
     const checkAuth = async () => {
       try {
-        const response = await fetch(`${API}/auth/me`, {
-          credentials: 'include'
-        });
+        const response = await fetch(`${API}/auth/me`, { credentials: 'include' });
         if (!response.ok) throw new Error('Not authenticated');
         const userData = await response.json();
         setUser(userData);
@@ -55,25 +75,28 @@ export default function SetupPage() {
       }
     };
     checkAuth();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [navigate, location.state]);
 
-  const checkOpenClawStatus = async () => {
-    setCheckingStatus(true);
+  useEffect(() => {
+    if (!isAuthenticated) return undefined;
+    pollRef.current = setInterval(() => checkOpenClawStatus(true), STATUS_POLL_MS);
+    return () => clearInterval(pollRef.current);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAuthenticated]);
+
+  const checkOpenClawStatus = async (silent = false) => {
+    if (!silent) setCheckingStatus(true);
     try {
-      const res = await fetch(`${API}/openclaw/status`, {
-        credentials: 'include'
-      });
+      const res = await fetch(`${API}/openclaw/status`, { credentials: 'include' });
       if (res.ok) {
         const data = await res.json();
         setStatus(data);
-        if (data.running && data.is_owner) {
-          toast.success('OpenClaw is already running!');
-        }
       }
     } catch (e) {
-      console.error('Status check failed:', e);
+      // Silent
     } finally {
-      setCheckingStatus(false);
+      if (!silent) setCheckingStatus(false);
     }
   };
 
@@ -88,10 +111,7 @@ export default function SetupPage() {
 
   const goToControlUI = async () => {
     try {
-      // Fetch the token to pass to the Control UI
-      const res = await fetch(`${API}/openclaw/token`, {
-        credentials: 'include'
-      });
+      const res = await fetch(`${API}/openclaw/token`, { credentials: 'include' });
       if (res.ok) {
         const data = await res.json();
         const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -107,24 +127,18 @@ export default function SetupPage() {
 
   const handleLogout = async () => {
     try {
-      await fetch(`${API}/auth/logout`, {
-        method: 'POST',
-        credentials: 'include'
-      });
+      await fetch(`${API}/auth/logout`, { method: 'POST', credentials: 'include' });
     } catch (e) {
-      // Ignore errors
+      // Ignore
     }
     navigate('/login', { replace: true });
   };
 
   const handleStopOpenClaw = async () => {
     try {
-      const res = await fetch(`${API}/openclaw/stop`, {
-        method: 'POST',
-        credentials: 'include'
-      });
+      const res = await fetch(`${API}/openclaw/stop`, { method: 'POST', credentials: 'include' });
       if (res.ok) {
-        setStatus(null);
+        setStatus(s => ({ ...(s || {}), running: false, pid: null, started_at: null }));
         toast.success('OpenClaw stopped');
       } else {
         const data = await res.json().catch(() => ({}));
@@ -142,7 +156,6 @@ export default function SetupPage() {
       toast.error('Please choose a provider');
       return;
     }
-    // Only require API key for non-emergent providers
     if (provider !== 'emergent' && (!apiKey || apiKey.length < 10)) {
       setError('Please enter a valid API key.');
       toast.error('Please enter a valid API key');
@@ -153,24 +166,18 @@ export default function SetupPage() {
       setLoading(true);
       setProgress(15);
 
-      // Simulate progress while waiting
       const progressInterval = setInterval(() => {
-        setProgress(prev => {
-          if (prev < 80) return prev + Math.random() * 10;
-          return prev;
-        });
+        setProgress(prev => (prev < 80 ? prev + Math.random() * 10 : prev));
       }, 500);
 
       const payload = { provider };
-      if (provider !== 'emergent' && apiKey) {
-        payload.apiKey = apiKey;
-      }
+      if (provider !== 'emergent' && apiKey) payload.apiKey = apiKey;
 
       const res = await fetch(`${API}/openclaw/start`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify(payload)
+        body: JSON.stringify(payload),
       });
 
       clearInterval(progressInterval);
@@ -183,19 +190,15 @@ export default function SetupPage() {
       const data = await res.json();
       setProgress(95);
       toast.success('OpenClaw started successfully!');
-      
-      // Build the Control UI URL with token for authentication
-      // The Control UI accepts token as a query parameter which it stores in localStorage
+
       const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
       const gatewayWsUrl = `${wsProtocol}//${window.location.host}/api/openclaw/ws`;
       const controlUrl = `${data.controlUrl}?gatewayUrl=${encodeURIComponent(gatewayWsUrl)}&token=${encodeURIComponent(data.token)}`;
-      
-      // Small delay before redirect
+
       setTimeout(() => {
         setProgress(100);
         window.location.href = controlUrl;
       }, 1000);
-
     } catch (e) {
       console.error(e);
       setError(e.message || 'Unable to start OpenClaw');
@@ -210,49 +213,52 @@ export default function SetupPage() {
       <div className="min-h-screen bg-[#0f0f10] flex items-center justify-center">
         <div className="text-zinc-400 flex items-center gap-2">
           <Loader2 className="w-5 h-5 animate-spin" />
-          {isAuthenticated === null ? 'Checking authentication...' : 'Checking OpenClaw status...'}
+          {isAuthenticated === null ? 'Checking authentication...' : 'Loading dashboard...'}
         </div>
       </div>
     );
   }
 
+  const running = !!status?.running;
+  const isOwner = !!status?.is_owner;
+  const blocked = running && !isOwner;
+  const uptime = running ? formatUptime(status?.started_at) : '—';
+  // uptimeTick referenced so React re-renders every second
+  void uptimeTick;
+
   return (
     <div className="min-h-screen bg-[#0f0f10] text-zinc-100">
-      {/* Subtle texture overlay */}
       <div className="texture-noise" aria-hidden="true" />
 
       {/* Header */}
-      <header className="relative z-10 container mx-auto px-4 sm:px-6 py-8 sm:py-12">
-        <motion.div 
+      <header className="relative z-10 container mx-auto px-4 sm:px-6 py-8">
+        <motion.div
           initial={{ opacity: 0, y: -10 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.3 }}
-          className="flex justify-between items-start"
+          className="flex justify-between items-center"
         >
-          <div className="max-w-lg">
-            <div className="flex items-center gap-3 mb-2">
-              <OpenClaw size={36} />
+          <div className="flex items-center gap-3">
+            <OpenClaw size={36} />
+            <div>
               <h1 className="heading text-2xl sm:text-3xl font-semibold tracking-tight">
-                OpenClaw Setup
+                OpenClaw Dashboard
               </h1>
+              <p className="text-zinc-500 text-xs sm:text-sm">
+                Manage your OpenClaw instance
+              </p>
             </div>
-            <p className="text-zinc-400 text-sm sm:text-base">
-              Connect your LLM provider to start the OpenClaw Control UI.
-            </p>
           </div>
-          
-          {/* User info and logout */}
+
           <div className="flex items-center gap-3">
             {user && (
-              <div className="flex items-center gap-2 text-sm text-zinc-400">
+              <div className="flex items-center gap-2 text-sm text-zinc-400" data-testid="user-chip">
                 {user.picture ? (
-                  <img 
-                    src={user.picture} 
-                    alt={user.name} 
-                    className="w-8 h-8 rounded-full"
-                  />
+                  <img src={user.picture} alt={user.name} className="w-8 h-8 rounded-full" />
                 ) : (
-                  <User className="w-5 h-5" />
+                  <div className="w-8 h-8 rounded-full bg-[#1f2022] flex items-center justify-center">
+                    <User className="w-4 h-4" />
+                  </div>
                 )}
                 <span className="hidden sm:inline">{user.name}</span>
               </div>
@@ -271,167 +277,221 @@ export default function SetupPage() {
         </motion.div>
       </header>
 
-      {/* Main Content */}
-      <main className="relative z-10 container mx-auto px-4 sm:px-6 pb-16">
-        {/* If OpenClaw is running by another user */}
-        {status?.running && !status?.is_owner && (
-          <motion.div
-            initial={{ opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.2 }}
-            className="max-w-lg mb-6"
+      {/* Main */}
+      <main className="relative z-10 container mx-auto px-4 sm:px-6 pb-16 space-y-6">
+        {/* Status hero */}
+        <motion.div
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.25 }}
+        >
+          <Card
+            data-testid="status-hero"
+            className={`border-[#1f2022] bg-[#141416]/95 backdrop-blur-sm ${running ? 'ring-1 ring-[#22c55e]/20' : ''}`}
           >
-            <Card className="border-yellow-900/40 bg-yellow-950/20 backdrop-blur-sm">
-              <CardContent className="pt-6">
-                <div className="flex items-center gap-3 text-yellow-500 mb-4">
-                  <AlertCircle className="w-5 h-5" />
-                  <span className="font-medium">OpenClaw in use</span>
+            <CardContent className="pt-6">
+              <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-5">
+                <div className="flex items-start gap-4">
+                  <div className={`mt-1 relative w-3 h-3 rounded-full ${running ? 'bg-[#22c55e]' : 'bg-zinc-600'}`}>
+                    {running && (
+                      <span className="absolute inset-0 rounded-full bg-[#22c55e] animate-ping opacity-40" />
+                    )}
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-3 flex-wrap">
+                      <span className="heading text-xl font-semibold" data-testid="status-label">
+                        {running ? 'Running' : 'Stopped'}
+                      </span>
+                      {running && (
+                        <span className="text-xs uppercase tracking-wider text-zinc-500 px-2 py-0.5 border border-[#1f2022] rounded">
+                          {status?.provider || 'unknown'}
+                        </span>
+                      )}
+                      {blocked && (
+                        <span className="text-xs uppercase tracking-wider text-yellow-400 px-2 py-0.5 border border-yellow-900/60 rounded">
+                          In use by another user
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-zinc-500 text-sm mt-1">
+                      {running
+                        ? <>Uptime <span className="text-zinc-300 font-medium" data-testid="uptime">{uptime}</span>{status?.pid && <> · PID {status.pid}</>}</>
+                        : 'Configure a provider and start the gateway below.'}
+                    </p>
+                  </div>
                 </div>
-                <p className="text-zinc-400 text-sm">
-                  Another user is currently using OpenClaw. Please wait for them to stop their session.
-                </p>
-              </CardContent>
-            </Card>
-          </motion.div>
-        )}
 
-        {/* If already running and user is owner, show status card */}
-        {status?.running && status?.is_owner && (
-          <motion.div
-            initial={{ opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.2 }}
-            className="max-w-lg mb-6"
-          >
-            <Card className="border-[#22c55e]/30 bg-[#141416]/95 backdrop-blur-sm">
-              <CardContent className="pt-6">
-                <div className="flex items-center gap-3 text-[#22c55e] mb-4">
-                  <CheckCircle2 className="w-5 h-5" />
-                  <span className="font-medium">OpenClaw is running</span>
-                </div>
-                <p className="text-zinc-400 text-sm mb-4">
-                  Provider: <span className="text-zinc-200 capitalize">{status.provider}</span>
-                </p>
-                <div className="flex gap-3">
+                <div className="flex gap-2 flex-wrap">
+                  {running && isOwner && (
+                    <>
+                      <Button
+                        onClick={goToControlUI}
+                        className="bg-[#FF4500] hover:bg-[#E63E00] text-white"
+                        data-testid="control-ui-redirect"
+                      >
+                        Open Control UI
+                        <ExternalLink className="w-4 h-4 ml-2" />
+                      </Button>
+                      <Button
+                        onClick={handleStopOpenClaw}
+                        variant="outline"
+                        className="border-zinc-700 hover:bg-zinc-800 text-zinc-300"
+                        data-testid="stop-moltbot-button"
+                      >
+                        Stop
+                      </Button>
+                    </>
+                  )}
                   <Button
-                    onClick={goToControlUI}
-                    className="flex-1 bg-[#FF4500] hover:bg-[#E63E00] text-white"
-                    data-testid="control-ui-redirect"
+                    onClick={() => checkOpenClawStatus()}
+                    variant="ghost"
+                    size="sm"
+                    className="text-zinc-400 hover:text-zinc-200 hover:bg-[#1f2022]"
+                    data-testid="refresh-status"
+                    title="Refresh status"
                   >
-                    Open Control UI
-                    <ExternalLink className="w-4 h-4 ml-2" />
-                  </Button>
-                  <Button
-                    onClick={handleStopOpenClaw}
-                    variant="outline"
-                    className="border-zinc-700 hover:bg-zinc-800 text-zinc-300"
-                    data-testid="stop-moltbot-button"
-                  >
-                    Stop
+                    <RefreshCw className="w-4 h-4" />
                   </Button>
                 </div>
-              </CardContent>
-            </Card>
-          </motion.div>
-        )}
+              </div>
+            </CardContent>
+          </Card>
+        </motion.div>
 
-        {/* Setup Card - show if not running or if user is owner */}
-        {(!status?.running || status?.is_owner) && (
+        {/* Info strip */}
+        <motion.div
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.25, delay: 0.05 }}
+          className="grid grid-cols-1 sm:grid-cols-3 gap-4"
+        >
+          <Card className="border-[#1f2022] bg-[#141416]/95 backdrop-blur-sm">
+            <CardContent className="pt-5 pb-5">
+              <div className="flex items-center gap-2 text-zinc-500 text-xs uppercase tracking-wider mb-2">
+                <Shield className="w-3.5 h-3.5" />
+                Signed in as
+              </div>
+              <div className="text-zinc-200 font-medium truncate" data-testid="info-email">
+                {user?.email || '—'}
+              </div>
+            </CardContent>
+          </Card>
+          <Card className="border-[#1f2022] bg-[#141416]/95 backdrop-blur-sm">
+            <CardContent className="pt-5 pb-5">
+              <div className="flex items-center gap-2 text-zinc-500 text-xs uppercase tracking-wider mb-2">
+                <Server className="w-3.5 h-3.5" />
+                Instance
+              </div>
+              <div className="text-zinc-200 font-medium">
+                {isOwner || !status?.owner_user_id ? 'You own this instance' : 'Locked to another user'}
+              </div>
+            </CardContent>
+          </Card>
+          <Card className="border-[#1f2022] bg-[#141416]/95 backdrop-blur-sm">
+            <CardContent className="pt-5 pb-5">
+              <div className="flex items-center gap-2 text-zinc-500 text-xs uppercase tracking-wider mb-2">
+                <Cpu className="w-3.5 h-3.5" />
+                Provider
+              </div>
+              <div className="text-zinc-200 font-medium capitalize" data-testid="info-provider">
+                {status?.provider || (running ? 'unknown' : 'Not configured')}
+              </div>
+            </CardContent>
+          </Card>
+        </motion.div>
+
+        {/* Setup / Config card */}
+        {!blocked && (
           <motion.div
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.2, delay: 0.1 }}
+            transition={{ duration: 0.25, delay: 0.1 }}
           >
-            <Card className="max-w-lg border-[#1f2022] bg-[#141416]/95 backdrop-blur-sm setup-card">
+            <Card className="border-[#1f2022] bg-[#141416]/95 backdrop-blur-sm setup-card">
               <CardHeader>
-                <CardTitle className="heading text-xl font-semibold">
-                  {status?.running && status?.is_owner ? 'Restart with Different Config' : 'Provider & API Key'}
+                <CardTitle className="heading text-lg font-semibold flex items-center gap-2">
+                  <Activity className="w-4 h-4 text-[#FF4500]" />
+                  {running ? 'Restart with different configuration' : 'Start OpenClaw'}
                 </CardTitle>
-                <CardDescription className="text-zinc-400">
-                  {status?.running && status?.is_owner 
-                    ? 'Restart OpenClaw with a different provider or key'
-                    : 'Enter your LLM provider credentials to start OpenClaw'
-                  }
+                <CardDescription className="text-zinc-500">
+                  {running
+                    ? 'Stopping the current instance will clear the active session.'
+                    : 'Choose a provider and (if needed) an API key.'}
                 </CardDescription>
               </CardHeader>
-              
+
               <CardContent className="space-y-5">
-                {/* Provider Select */}
-                <div className="space-y-2">
-                  <Label htmlFor="provider" className="text-zinc-200">LLM Provider</Label>
-                  <Select 
-                    onValueChange={(val) => {
-                      setProvider(val);
-                      if (val === 'emergent') setApiKey('');
-                    }} 
-                    value={provider}
-                    disabled={loading}
-                  >
-                    <SelectTrigger 
-                      id="provider" 
-                      data-testid="provider-select"
-                      className="bg-[#0f0f10] border-[#1f2022] focus:ring-[#FF4500] focus:ring-offset-0 h-11"
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                  <div className="space-y-2">
+                    <Label htmlFor="provider" className="text-zinc-200">LLM Provider</Label>
+                    <Select
+                      onValueChange={(val) => {
+                        setProvider(val);
+                        if (val === 'emergent') setApiKey('');
+                      }}
+                      value={provider}
+                      disabled={loading}
                     >
-                      <SelectValue placeholder="Choose provider" />
-                    </SelectTrigger>
-                    <SelectContent className="bg-[#141416] border-[#1f2022]">
-                      <SelectItem value="emergent" className="focus:bg-[#1f2022]">
-                        Emergent (Recommended - No key needed)
-                      </SelectItem>
-                      <SelectItem value="anthropic" className="focus:bg-[#1f2022]">
-                        Anthropic (Claude) - Bring your own key
-                      </SelectItem>
-                      <SelectItem value="openai" className="focus:bg-[#1f2022]">
-                        OpenAI (GPT) - Bring your own key
-                      </SelectItem>
-                    </SelectContent>
-                  </Select>
-                  {provider === 'emergent' && (
-                    <p className="text-xs text-[#22c55e]">
-                      Pre-configured with Claude Opus 4.5 and GPT-5.2 - no API key needed
-                    </p>
+                      <SelectTrigger
+                        id="provider"
+                        data-testid="provider-select"
+                        className="bg-[#0f0f10] border-[#1f2022] focus:ring-[#FF4500] focus:ring-offset-0 h-11"
+                      >
+                        <SelectValue placeholder="Choose provider" />
+                      </SelectTrigger>
+                      <SelectContent className="bg-[#141416] border-[#1f2022]">
+                        <SelectItem value="emergent" className="focus:bg-[#1f2022]">
+                          Emergent (no key needed)
+                        </SelectItem>
+                        <SelectItem value="anthropic" className="focus:bg-[#1f2022]">
+                          Anthropic (Claude) — bring your own key
+                        </SelectItem>
+                        <SelectItem value="openai" className="focus:bg-[#1f2022]">
+                          OpenAI (GPT) — bring your own key
+                        </SelectItem>
+                      </SelectContent>
+                    </Select>
+                    {provider === 'emergent' && (
+                      <p className="text-xs text-[#22c55e]">
+                        Pre-configured with Claude and GPT models — no API key needed.
+                      </p>
+                    )}
+                  </div>
+
+                  {provider !== 'emergent' && (
+                    <div className="space-y-2">
+                      <Label htmlFor="apiKey" className="text-zinc-200">API Key</Label>
+                      <div className="relative">
+                        <Input
+                          id="apiKey"
+                          data-testid="api-key-input"
+                          type={reveal ? 'text' : 'password'}
+                          value={apiKey}
+                          onChange={(e) => setApiKey(e.target.value)}
+                          disabled={loading}
+                          className="pr-12 tracking-wider bg-[#0f0f10] border-[#1f2022] focus-visible:ring-[#FF4500] focus-visible:ring-offset-0 h-11 api-key-input"
+                          placeholder={provider === 'openai' ? 'sk-...' : 'sk-ant-...'}
+                          aria-describedby="apiKeyHelp"
+                        />
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          data-testid="reveal-api-key-toggle"
+                          onClick={() => setReveal(r => !r)}
+                          disabled={loading}
+                          className="absolute right-2 top-1/2 -translate-y-1/2 h-8 px-2 text-zinc-400 hover:text-zinc-200 hover:bg-[#1f2022]"
+                        >
+                          {reveal ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                        </Button>
+                      </div>
+                      <p id="apiKeyHelp" className="text-xs text-zinc-500">
+                        Your key is used only to start OpenClaw.
+                      </p>
+                    </div>
                   )}
                 </div>
 
-                {/* API Key Input - Only show for non-emergent providers */}
-                {provider !== 'emergent' && (
-                  <div className="space-y-2">
-                    <Label htmlFor="apiKey" className="text-zinc-200">API Key</Label>
-                    <div className="relative">
-                      <Input
-                        id="apiKey"
-                        data-testid="api-key-input"
-                        type={reveal ? 'text' : 'password'}
-                        value={apiKey}
-                        onChange={(e) => setApiKey(e.target.value)}
-                        disabled={loading}
-                        className="pr-20 tracking-wider bg-[#0f0f10] border-[#1f2022] focus-visible:ring-[#FF4500] focus-visible:ring-offset-0 h-11 api-key-input"
-                        placeholder={provider === 'openai' ? 'sk-...' : 'sk-ant-...'}
-                        aria-describedby="apiKeyHelp"
-                      />
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        data-testid="reveal-api-key-toggle"
-                        onClick={() => setReveal(r => !r)}
-                        disabled={loading}
-                        className="absolute right-2 top-1/2 -translate-y-1/2 h-8 px-3 text-xs text-zinc-400 hover:text-zinc-200 hover:bg-[#1f2022]"
-                      >
-                        {reveal ? (
-                          <EyeOff className="w-4 h-4" />
-                        ) : (
-                          <Eye className="w-4 h-4" />
-                        )}
-                      </Button>
-                    </div>
-                    <p id="apiKeyHelp" className="text-xs text-zinc-500">
-                      Your key is used only to start OpenClaw and is stored securely.
-                    </p>
-                  </div>
-                )}
-
-                {/* Error Alert */}
                 {error && (
                   <motion.div
                     initial={{ opacity: 0, y: -4 }}
@@ -444,25 +504,12 @@ export default function SetupPage() {
                   </motion.div>
                 )}
 
-                {/* Progress Indicator */}
                 {loading && (
-                  <motion.div
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    className="space-y-3"
-                  >
-                    <Progress 
-                      value={progress} 
-                      data-testid="startup-progress" 
-                      className="h-2 bg-[#1f2022]"
-                    />
+                  <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-3">
+                    <Progress value={progress} data-testid="startup-progress" className="h-2 bg-[#1f2022]" />
                     <div className="flex items-center gap-2">
                       <Loader2 className="w-4 h-4 animate-spin text-[#FF4500]" />
-                      <p 
-                        className="text-sm text-zinc-400" 
-                        data-testid="startup-status-text"
-                        aria-live="polite"
-                      >
+                      <p className="text-sm text-zinc-400" data-testid="startup-status-text" aria-live="polite">
                         {stageText}
                       </p>
                     </div>
@@ -474,7 +521,7 @@ export default function SetupPage() {
                 <Button
                   onClick={start}
                   data-testid="start-moltbot-button"
-                  disabled={loading || !provider || (provider !== 'emergent' && !apiKey) || (status?.running && !status?.is_owner)}
+                  disabled={loading || !provider || (provider !== 'emergent' && !apiKey) || blocked}
                   className="w-full sm:w-auto bg-[#FF4500] hover:bg-[#E63E00] text-white font-medium h-11 px-6 btn-primary"
                 >
                   {loading ? (
@@ -482,11 +529,13 @@ export default function SetupPage() {
                       <Loader2 className="w-4 h-4 mr-2 animate-spin" />
                       Starting...
                     </>
+                  ) : running ? (
+                    'Restart OpenClaw'
                   ) : (
                     'Start OpenClaw'
                   )}
                 </Button>
-                
+
                 <a
                   href="https://docs.molt.bot/web/control-ui"
                   target="_blank"
@@ -502,26 +551,25 @@ export default function SetupPage() {
           </motion.div>
         )}
 
-        {/* Footer Info */}
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ duration: 0.3, delay: 0.3 }}
-          className="max-w-lg mt-8 text-center text-xs text-zinc-600"
-        >
-          <p>
-            OpenClaw is an open-source personal AI assistant.{' '}
-            <a 
-              href="https://github.com/openclaw/moltbot" 
-              target="_blank" 
-              rel="noreferrer"
-              className="text-zinc-500 hover:text-zinc-400 underline underline-offset-2"
-              data-testid="help-link"
-            >
-              Learn more on GitHub
-            </a>
-          </p>
-        </motion.div>
+        {blocked && (
+          <motion.div
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.2 }}
+          >
+            <Card className="border-yellow-900/40 bg-yellow-950/20 backdrop-blur-sm">
+              <CardContent className="pt-6">
+                <div className="flex items-center gap-3 text-yellow-500 mb-2">
+                  <AlertCircle className="w-5 h-5" />
+                  <span className="font-medium">OpenClaw is in use by another user</span>
+                </div>
+                <p className="text-zinc-400 text-sm">
+                  Wait for them to stop their session before starting yours.
+                </p>
+              </CardContent>
+            </Card>
+          </motion.div>
+        )}
       </main>
     </div>
   );

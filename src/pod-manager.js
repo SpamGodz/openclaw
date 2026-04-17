@@ -20,6 +20,7 @@ class PodManager {
     try { msg = JSON.parse(raw); } catch { return; }
 
     switch (msg.type) {
+      case 'pod':
       case 'REGISTER': {
         const podId = msg.podId || crypto.randomBytes(6).toString('hex');
         const state = {

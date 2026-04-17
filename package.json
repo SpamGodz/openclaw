@@ -10,10 +10,29 @@
     ".": "./src/server.js",
     "./sdk/pod": "./sdk/pod.js"
   },
+  "files": [
+    "bin/",
+    "src/",
+    "sdk/",
+    "scripts/",
+    "README.md"
+  ],
   "scripts": {
     "start": "node src/server.js",
-    "deploy": "node src/server.js"
+    "deploy": "node src/server.js",
+    "test": "node --test test/*.test.js"
   },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/SpamGodz/openclaw.git"
+  },
+  "bugs": {
+    "url": "https://github.com/SpamGodz/openclaw/issues"
+  },
+  "homepage": "https://github.com/SpamGodz/openclaw#readme",
   "keywords": ["dashboard", "microservices", "pods", "ai", "hermes", "real-time", "cli"],
   "author": "",
   "license": "MIT",

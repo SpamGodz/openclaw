@@ -1,0 +1,27 @@
+{
+  "name": "openclaw",
+  "version": "1.0.0",
+  "description": "AI-powered pod hive dashboard — live microservice monitoring with Hermes Agent integration",
+  "main": "src/server.js",
+  "bin": {
+    "openclaw": "./bin/openclaw.js"
+  },
+  "exports": {
+    ".": "./src/server.js",
+    "./sdk/pod": "./sdk/pod.js"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "deploy": "node src/server.js"
+  },
+  "keywords": ["dashboard", "microservices", "pods", "ai", "hermes", "real-time", "cli"],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.36.3",
+    "axios": "^1.7.9",
+    "commander": "^12.1.0",
+    "express": "^4.21.2",
+    "ws": "^8.18.0"
+  }
+}

@@ -487,7 +487,7 @@ def create_moltbot_config(token: str = None, api_key: str = None, provider: str 
     # Configure providers based on selection
     if provider == "emergent":
         # Use Emergent's proxy for both GPT and Claude
-        emergent_key = api_key or os.environ.get('EMERGENT_API_KEY', 'sk-emergent-1234')
+        emergent_key = api_key or os.environ.get('EMERGENT_API_KEY')
         emergent_base_url = os.environ.get('EMERGENT_BASE_URL', 'https://integrations.emergentagent.com/llm')
 
         # Emergent GPT provider (openai-completions API)
@@ -777,6 +777,10 @@ async def start_moltbot(request: OpenClawStartRequest, req: Request):
     # For non-emergent providers, API key is required
     if request.provider in ["anthropic", "openai"] and (not request.apiKey or len(request.apiKey) < 10):
         raise HTTPException(status_code=400, detail="API key required for anthropic/openai providers")
+
+    # Emergent can fall back to a server-side key, but never to a placeholder
+    if request.provider == "emergent" and not (request.apiKey or os.environ.get('EMERGENT_API_KEY')):
+        raise HTTPException(status_code=400, detail="Emergent API key required: pass apiKey or set EMERGENT_API_KEY on the server")
 
     # Check if Moltbot is already running by another user
     if check_gateway_running() and gateway_state["owner_user_id"] != user.user_id:

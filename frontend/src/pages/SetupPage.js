@@ -14,6 +14,13 @@ import OpenClaw from '@/components/ui/icons/OpenClaw';
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || '';
 const API = `${BACKEND_URL}/api`;
 
+// Gateway WebSocket lives on the backend host, which may differ from the page host
+const gatewayWsUrl = () => {
+  const base = new URL(BACKEND_URL || window.location.origin);
+  const wsProtocol = base.protocol === 'https:' ? 'wss:' : 'ws:';
+  return `${wsProtocol}//${base.host}/api/openclaw/ws`;
+};
+
 export default function SetupPage() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -94,9 +101,7 @@ export default function SetupPage() {
       });
       if (res.ok) {
         const data = await res.json();
-        const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        const gatewayWsUrl = `${wsProtocol}//${window.location.host}/api/openclaw/ws`;
-        window.location.href = `${API}/openclaw/ui/?gatewayUrl=${encodeURIComponent(gatewayWsUrl)}&token=${encodeURIComponent(data.token)}`;
+        window.location.href = `${API}/openclaw/ui/?gatewayUrl=${encodeURIComponent(gatewayWsUrl())}&token=${encodeURIComponent(data.token)}`;
       } else {
         toast.error('Unable to get access token');
       }
@@ -186,9 +191,7 @@ export default function SetupPage() {
       
       // Build the Control UI URL with token for authentication
       // The Control UI accepts token as a query parameter which it stores in localStorage
-      const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const gatewayWsUrl = `${wsProtocol}//${window.location.host}/api/openclaw/ws`;
-      const controlUrl = `${data.controlUrl}?gatewayUrl=${encodeURIComponent(gatewayWsUrl)}&token=${encodeURIComponent(data.token)}`;
+      const controlUrl = `${data.controlUrl}?gatewayUrl=${encodeURIComponent(gatewayWsUrl())}&token=${encodeURIComponent(data.token)}`;
       
       // Small delay before redirect
       setTimeout(() => {

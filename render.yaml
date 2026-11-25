@@ -1,0 +1,22 @@
+# Render Blueprint for the FastAPI backend (backend/server.py).
+# The frontend stays on Vercel and forwards /api/* here (see frontend/vercel.json),
+# so the login cookie is first-party and no CORS setup is needed for it.
+services:
+  - type: web
+    name: spamgodz-openclaw-api # URL becomes https://spamgodz-openclaw-api.onrender.com
+    runtime: python
+    plan: free
+    region: virginia # same region as the Vercel build (iad1)
+    buildCommand: pip install -r requirements.txt
+    startCommand: cd backend && uvicorn server:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/
+    autoDeploy: true
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.7
+      - key: MONGO_URL # MongoDB Atlas connection string, entered in the Render dashboard
+        sync: false
+      - key: DB_NAME
+        value: openclaw
+      - key: EMERGENT_API_KEY # only needed to start the gateway with the Emergent provider
+        sync: false
